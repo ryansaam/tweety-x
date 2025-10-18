@@ -1,0 +1,32 @@
+{
+  "name": "Tweety X",
+  "description": "Fetches a generated post and types it into x.com",
+  "version": "1.0.0",
+  "manifest_version": 3,
+  "permissions": [
+    "scripting",
+    "activeTab",
+    "tabs",
+    "storage",
+    "debugger"
+  ],
+  "host_permissions": [
+    "https://x.com/*",
+    "https://twitter.com/*",
+    "http://localhost:11000/*"
+  ],
+  "action": {
+    "default_title": "Tweety X",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://x.com/*", "https://twitter.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
