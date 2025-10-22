@@ -1,0 +1,25 @@
+<div class="xbot-pop" id="xbot-pop">
+  <div class="xbot-row">
+    <span class="xbot-title">Tweety X</span>
+    <span class="xbot-spacer"></span>
+  </div>
+  <div class="xbot-row" style="margin-top:6px">
+    <span id="xbot-msg" class="xbot-msg">Loading…</span>
+    <span id="xbot-dots" class="xbot-dots"></span>
+  </div>
+  <div class="controls">
+    <button id="xbot-playpause" class="xbot-btn" title="Start/stop engine">Play</button>
+    <button id="xbot-fire" class="xbot-btn" title="Queue mouse move">Fire Mouse</button>
+    <button id="xbot-cancel" class="xbot-btn">Cancel</button>
+  </div>
+  <div class="xbot-row" style="margin-top:8px; font-size:12px; opacity:.85">
+    <div>FPS: <span id="xbot-fps">0</span></div>
+    <span class="xbot-spacer"></span>
+    <div>Queue: <span id="xbot-queue">0</span></div>
+  </div>
+  <div class="xbot-row" style="margin-top:8px">
+    <button id="xbot-scroll" class="xbot-btn" title="Scroll next post into view">Fire scroll</button>
+    <input id="xbot-scroll-speed" type="number" min="1" step="100" value="1600" style="width:90px;margin-left:8px" class="xbot-input" />
+    <span style="font-size:12px;opacity:.8;margin-left:6px">px/s</span>
+  </div>
+</div>

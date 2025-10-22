@@ -20,13 +20,23 @@
     "default_popup": "popup.html"
   },
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "src/background/index.js",
+    "type": "module"
   },
   "content_scripts": [
     {
-      "matches": ["https://x.com/*", "https://twitter.com/*"],
-      "js": ["content.js"],
+      "matches": ["*://*.x.com/*", "*://x.com/*", "*://twitter.com/*"],
+      "js": ["content/content.js"],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content/styles/popup.css",
+        "content/ui/popup.html"
+      ],
+      "matches": ["<all_urls>"]
     }
   ]
 }
