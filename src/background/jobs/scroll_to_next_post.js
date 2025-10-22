@@ -2,9 +2,65 @@
 // Scrolls the next tweet (below the timeline anchor) under the tab bar at a given speed (px/s).
 import { ensureTimelineAnchor } from "../layout.js";
 
+// --- precise stop control ---
+const STOP_EPS = 2; // px tolerance to consider aligned
+// Require the next tweet's cell top to be at least this far below the anchor
+// to avoid picking the same tweet again due to 1–2px rounding jitter.
+const MIN_GAP = 12; // px hysteresis
+
+// Remember the last tweet we aligned to; skip it on the next job.
+let lastAlignedStatusId = null;
+
+// Re-find the virtualized cell for a given status id and measure its top (BCR).
+async function measureCellTopForStatus(tabId, statusId) {
+  // 1) Find an anchor inside the tweet article that points to /status/{id}
+  const { root } = await chrome.debugger.sendCommand({ tabId }, "DOM.getDocument", { depth: -1 });
+  const { nodeId: anchorNode } = await chrome.debugger.sendCommand({ tabId }, "DOM.querySelector", {
+    nodeId: root.nodeId,
+    selector: `article[role="article"][data-testid="tweet"] a[role="link"][href*="/status/${statusId}"]`,
+  });
+  if (!anchorNode) return null;
+
+  // 2) Walk up to the virtualized cell
+  const { object } = await chrome.debugger.sendCommand({ tabId }, "DOM.resolveNode", { nodeId: anchorNode });
+  if (!object?.objectId) return null;
+  const { result: ancRes } = await chrome.debugger.sendCommand({ tabId }, "Runtime.callFunctionOn", {
+    objectId: object.objectId,
+    functionDeclaration: `
+      function() {
+        let el = this;
+        while (el && el !== document.documentElement) {
+          if (el.dataset && el.dataset.testid === 'cellInnerDiv') return el;
+          el = el.parentElement;
+        }
+        return null;
+      }
+    `,
+    returnByValue: false,
+    silent: true,
+  });
+  if (!ancRes?.objectId) return null;
+
+  // 3) Measure via getBoundingClientRect for accuracy in CSS px
+  const evalRes = await chrome.debugger.sendCommand({ tabId }, "Runtime.callFunctionOn", {
+    objectId: ancRes.objectId,
+    functionDeclaration: `
+      function() {
+        const r = this.getBoundingClientRect();
+        return { top: r.top };
+      }
+    `,
+    returnByValue: true,
+    silent: true,
+  });
+  const top = evalRes?.result?.value?.top;
+  return Number.isFinite(top) ? top : null;
+}
+
 // Helper: find the closest tweet cell (ancestor `div[data-testid="cellInnerDiv"]`)
-// below anchor.bottom and extract its /status/ID
-async function findNextPostBelow(tabId, anchorBottom) {
+// below a minimum top (minTop) and extract its /status/ID
+async function findNextPostBelow(tabId, minTop, opts = {}) {
+  const skipId = opts.skip || null;
   // Query all tweet articles
   const { root } = await chrome.debugger.sendCommand({ tabId }, "DOM.getDocument", { depth: -1 });
   const { nodeIds } = await chrome.debugger.sendCommand({ tabId }, "DOM.querySelectorAll", {
@@ -64,8 +120,8 @@ async function findNextPostBelow(tabId, anchorBottom) {
         continue;
       }
       const top = Math.min(c[1], c[3], c[5], c[7]);
-      if (top <= anchorBottom) continue; // only below anchor
-      const dy = Math.round(top - anchorBottom);
+      if (top < minTop) continue; // only meaningfully below the anchor
+      const dy = Math.round(top - minTop);
       console.log("[X-BOT/bg] findNextPostBelow: candidate cell", cellId, "from article", nodeId, "top-offset", dy);
 
       // === Plan A: query the anchor directly inside the article ===
@@ -94,6 +150,12 @@ async function findNextPostBelow(tabId, anchorBottom) {
         continue;
       }
       const id = m[1];
+
+      // Skip the last aligned tweet to avoid re-selecting it on tiny layout jitter
+      if (skipId && id === skipId) {
+        console.log("[X-BOT/bg] findNextPostBelow: skipping last aligned id", id);
+        continue;
+      }
 
       if (!best || top < best.top) {
         best = { nodeId, cellId, top, id, href };
@@ -184,18 +246,15 @@ export function begin(job, tabId) {
 }
 
 export function tick(job, dtMs) {
-  // pure math accrual only; actual setup done in render when needed
+  // No-op: final motion is clamped by measured remaining distance in render().
   const rt = job._rt;
-  if (!rt) return;
-  if (rt.done) return;
-  if (!rt.inited) return; // wait for first render to initialize geometry
-  rt.progressPx = Math.min(rt.targetDelta, (rt.progressPx || 0) + (rt.speed * (dtMs / 1000)));
+  if (!rt || rt.done) return;
 }
 
 export async function render(job, { tabId, mouseWheel, frameAlpha, dtPerTick }) {
   const rt = job._rt;
   if (!rt.inited) {
-    // Initialize anchor + target distance
+    // Initialize anchor + discover next post
     const anchor = await ensureTimelineAnchor(tabId);
     if (!anchor) {
       console.warn("[X-BOT/bg] scroll_to_next_post: anchor not found; abort");
@@ -203,7 +262,8 @@ export async function render(job, { tabId, mouseWheel, frameAlpha, dtPerTick }) 
       return true;
     }
     console.log(`[X-BOT/bg] scroll_to_next_post: anchor bottom = ${Math.round(anchor.rect.bottom)}`);
-    const next = await findNextPostBelow(tabId, anchor.rect.bottom);
+    // Use hysteresis and skip the last aligned tweet (if any)
+    const next = await findNextPostBelow(tabId, anchor.rect.bottom + MIN_GAP, { skip: lastAlignedStatusId });
     if (!next) {
       console.warn("[X-BOT/bg] scroll_to_next_post: no post found below anchor; abort");
       rt.done = true;
@@ -213,33 +273,43 @@ export async function render(job, { tabId, mouseWheel, frameAlpha, dtPerTick }) 
     let speed = Number(p.speed);
     if (!Number.isFinite(speed) || speed <= 0) speed = 1600; // px/s default
 
+    // Track anchor position + target status id; we’ll clamp motion each frame to measured remaining distance.
     rt.anchorBottom = anchor.rect.bottom;
-    // Use the measured top of the cell (not the article) to compute scroll distance.
-    rt.targetDelta = Math.max(0, next.top - anchor.rect.bottom);
+    rt.statusId = next.id;
     rt.speed = speed;
-    rt.progressPx = 0;
+    rt.sentPx = 0;
     rt.inited = true;
-    console.log(`[X-BOT/bg] scroll_to_next_post init: id=${next.id} delta=${rt.targetDelta}px speed=${rt.speed} px/s (cellId=${next.cellId})`);
+    console.log(`[X-BOT/bg] scroll_to_next_post init: id=${next.id} speed=${rt.speed} px/s`);
   }
 
   if (rt.done) return true;
 
-  // Interpolate within current frame for smoother motion
-  const extra = rt.speed * (frameAlpha * (dtPerTick / 1000));
-  const ideal = Math.min(rt.targetDelta, (rt.progressPx || 0) + extra);
-
-  // Amount to scroll this frame (down = positive deltaY)
-  const already = rt.sentPx || 0;
-  let thisFrame = Math.max(0, ideal - already);
-  if (thisFrame > 0) {
-    await mouseWheel(tabId, { deltaY: thisFrame, x: 0, y: 0 });
-    rt.sentPx = already + thisFrame;
-  }
-
-  // Complete?
-  if ((rt.progressPx || 0) >= rt.targetDelta) {
+  // 1) Measure remaining distance from anchor → current cell top
+  const cellTop = await measureCellTopForStatus(tabId, rt.statusId);
+  if (cellTop == null) {
+    console.warn("[X-BOT/bg] scroll_to_next_post: cannot re-measure cell; abort");
     rt.done = true;
     return true;
+  }
+  const remaining = Math.max(0, cellTop - rt.anchorBottom);
+
+  // 2) If within epsilon, snap the last few px (if any) and finish
+  if (remaining <= STOP_EPS) {
+    if (remaining > 0.5) {
+      await mouseWheel(tabId, { deltaY: remaining, x: 0, y: 0 });
+    }
+    // Remember which status we just aligned to, so the next job won't re-pick it.
+    lastAlignedStatusId = rt.statusId || null;
+    rt.done = true;
+    return true;
+  }
+
+  // 3) Time-based desired motion (but clamped to avoid overshoot)
+  const baseStep = rt.speed * ((dtPerTick / 1000) + (frameAlpha * (dtPerTick / 1000)));
+  const thisFrame = Math.min(baseStep, Math.max(0, remaining - STOP_EPS));
+  if (thisFrame > 0) {
+    await mouseWheel(tabId, { deltaY: thisFrame, x: 0, y: 0 });
+    rt.sentPx = (rt.sentPx || 0) + thisFrame;
   }
   return false;
 }
