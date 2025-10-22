@@ -6,6 +6,11 @@ import { enqueueWork, peek as queuePeek, size as queueSize } from "./queue.js";
 import { getActiveMeta } from "./jobs/runner.js";
 import { Writer } from "./writer.js";
 
+// Cap outer loop to reduce CDP pressure (keeps UI smooth)
+const OUTER_FPS_CAP = 240;
+const OUTER_FRAME_MS = Math.ceil(1000 / OUTER_FPS_CAP);
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
 // ultra-fast engine loop with fixed-timestep tick + free-running render
 async function engineLoop(tabId) {
   const st = getTabState(tabId);
@@ -24,8 +29,6 @@ async function engineLoop(tabId) {
     while (st.running) {
       try {
         const now = performance.now();
-        // keep session hot
-        await chrome.debugger.sendCommand({ tabId }, "Page.getLayoutMetrics");
 
         // one frame worth of simulation + render (run() handles frameCount + FPS)
         await run(tabId, now);
@@ -35,6 +38,9 @@ async function engineLoop(tabId) {
           console.log(`[X-BOT/bg] fps=${engine.fps} frames=${engine.frameCount} queue=${queueSize()} active=${getActiveMeta() ? getActiveMeta().type : "none"}`);
           lastFpsLog = now;
         }
+
+        // Cap the outer loop to ~240 FPS (reduces CPU + CDP round-trips)
+        await sleep(OUTER_FRAME_MS);
       } catch (e) {
         console.warn("[X-BOT/bg] engine tick error:", e?.message || e);
         break;

@@ -11,49 +11,32 @@ const MIN_GAP = 12; // px hysteresis
 // Remember the last tweet we aligned to; skip it on the next job.
 let lastAlignedStatusId = null;
 
-// Re-find the virtualized cell for a given status id and measure its top (BCR).
+// Re-find the virtualized cell for a given status id and measure its top (single CDP call).
 async function measureCellTopForStatus(tabId, statusId) {
-  // 1) Find an anchor inside the tweet article that points to /status/{id}
-  const { root } = await chrome.debugger.sendCommand({ tabId }, "DOM.getDocument", { depth: -1 });
-  const { nodeId: anchorNode } = await chrome.debugger.sendCommand({ tabId }, "DOM.querySelector", {
-    nodeId: root.nodeId,
-    selector: `article[role="article"][data-testid="tweet"] a[role="link"][href*="/status/${statusId}"]`,
-  });
-  if (!anchorNode) return null;
-
-  // 2) Walk up to the virtualized cell
-  const { object } = await chrome.debugger.sendCommand({ tabId }, "DOM.resolveNode", { nodeId: anchorNode });
-  if (!object?.objectId) return null;
-  const { result: ancRes } = await chrome.debugger.sendCommand({ tabId }, "Runtime.callFunctionOn", {
-    objectId: object.objectId,
-    functionDeclaration: `
-      function() {
-        let el = this;
+  const expr = `
+    (function(id){
+      try {
+        // Find the tweet's permalink anchor
+        const a = document.querySelector(
+          'article[role="article"][data-testid="tweet"] a[role="link"][href*="/status/' + id + '"]'
+        );
+        if (!a) return null;
+        // Walk up to the virtualized cell
+        let el = a;
         while (el && el !== document.documentElement) {
-          if (el.dataset && el.dataset.testid === 'cellInnerDiv') return el;
+          if (el.dataset && el.dataset.testid === 'cellInnerDiv') {
+            return el.getBoundingClientRect().top;
+          }
           el = el.parentElement;
         }
         return null;
-      }
-    `,
-    returnByValue: false,
-    silent: true,
+      } catch (_) { return null; }
+    })(${JSON.stringify(String(statusId))})
+  `;
+  const { result } = await chrome.debugger.sendCommand({ tabId }, "Runtime.evaluate", {
+    expression: expr, returnByValue: true, awaitPromise: true, silent: true,
   });
-  if (!ancRes?.objectId) return null;
-
-  // 3) Measure via getBoundingClientRect for accuracy in CSS px
-  const evalRes = await chrome.debugger.sendCommand({ tabId }, "Runtime.callFunctionOn", {
-    objectId: ancRes.objectId,
-    functionDeclaration: `
-      function() {
-        const r = this.getBoundingClientRect();
-        return { top: r.top };
-      }
-    `,
-    returnByValue: true,
-    silent: true,
-  });
-  const top = evalRes?.result?.value?.top;
+  const top = result?.value;
   return Number.isFinite(top) ? top : null;
 }
 
