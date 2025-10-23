@@ -5,11 +5,13 @@ import { mouseMove, mouseWheel } from "../cdp.js";
 import { TICK_DT_MS } from "../engine.js";
 import * as MouseMove from "./mouse_move.js";
 import * as ScrollToNext from "./scroll_to_next_post.js";
+import * as CapturePost from "./capture_post_content.js";
 
 // Simple registry; expand with more job types later.
 const REGISTRY = {
   "mouse_move": MouseMove,
   "scroll_to_next_post": ScrollToNext,
+  "capture_post_content": CapturePost,
 };
 
 let activeJob = null; // { id, type, payload, _rt:{} }

@@ -150,12 +150,41 @@ function wireUI() {
       setStatus(`Queue error: ${e.message}`, "err");
     }
   });
+
+  // Capture the nearest post's content (below/near the anchor)
+  const captureBtn = $("#xbot-capture");
+  captureBtn?.addEventListener("click", async () => {
+    try {
+      setStatus("Queue: capture_post_content", "loading");
+      await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({
+          type: "XBOT_QUEUE_ADD",
+          workType: "capture_post_content",
+        }, (res) => {
+          if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+          resolve(res);
+        });
+      });
+      setStatus("Queued capture_post_content", "ok");
+    } catch (e) {
+      console.warn("[X-BOT] enqueue capture_post_content failed:", e);
+      setStatus(`Queue error: ${e.message}`, "err");
+    }
+  });
 }
 
 // ---------- optional debug log bridge (BG -> content) ----------
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === "XBOT_DEBUG") {
     try { console.log("[X-BOT][debug]", msg.tag || "", msg.payload || msg); } catch {}
+  }
+  if (msg?.type === "XBOT_CAPTURED_POST") {
+    try { console.log("[X-BOT][captured]", msg.payload); } catch {}
+    setStatus("Captured post", "ok");
+  }
+  if (msg?.type === "XBOT_CAPTURED_POST_SKIPPED") {
+    try { console.log("[X-BOT][captured][skipped]", msg.reason); } catch {}
+    setStatus(`Skipped (${msg.reason || "unknown"})`, "err");
   }
 });
 
