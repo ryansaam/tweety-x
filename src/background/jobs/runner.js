@@ -6,12 +6,17 @@ import { TICK_DT_MS } from "../engine.js";
 import * as MouseMove from "./mouse_move.js";
 import * as ScrollToNext from "./scroll_to_next_post.js";
 import * as CapturePost from "./capture_post_content.js";
+import * as GeneratePostReply from "./generate_post_reply.js";
+import * as WritePostReply from "./write_post_reply.js";
+import { setIdleHint as _setIdleHint } from "../engine.js";
 
 // Simple registry; expand with more job types later.
 const REGISTRY = {
   "mouse_move": MouseMove,
   "scroll_to_next_post": ScrollToNext,
   "capture_post_content": CapturePost,
+  "generate_post_reply": GeneratePostReply,
+  "write_post_reply": WritePostReply,
 };
 
 let activeJob = null; // { id, type, payload, _rt:{} }
@@ -50,6 +55,10 @@ export async function render(tabId, frameAlpha, dtPerTick) {
     dtPerTick: dtPerTick ?? TICK_DT_MS,
     mouseMove,
     mouseWheel,
+    postToContent: (payload) => {
+      try { chrome.tabs.sendMessage(tabId, payload); } catch {}
+    },
+    setIdleHint: (ms) => _setIdleHint(tabId, ms),
   });
   if (done) {
     console.log(`[X-BOT/bg] event complete: ${activeJob.type} #${activeJob.id}`);

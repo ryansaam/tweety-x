@@ -11,6 +11,7 @@
     <button id="xbot-playpause" class="xbot-btn" title="Start/stop engine">Play</button>
     <button id="xbot-fire" class="xbot-btn" title="Queue mouse move">Fire Mouse</button>
     <button id="xbot-cancel" class="xbot-btn">Cancel</button>
+    <button id="xbot-gen-reply" class="xbot-btn" title="Generate a reply to the last captured post">Gen Reply</button>
   </div>
   <div class="xbot-row" style="margin-top:8px; font-size:12px; opacity:.85">
     <div>FPS: <span id="xbot-fps">0</span></div>
@@ -24,5 +25,10 @@
   </div>
   <div class="xbot-row" style="margin-top:8px">
     <button id="xbot-capture" class="xbot-btn" title="Capture nearest post under tab bar">Capture Post</button>
+  </div>
+  <div class="xbot-row" style="margin-top:8px">
+    <button id="xbot-write-reply" class="xbot-btn" title="Type and post the generated reply">Write Reply</button>
+    <input id="xbot-typing-cps" type="number" min="3" max="30" step="1" value="12" style="width:90px;margin-left:8px" class="xbot-input" />
+    <span style="font-size:12px;opacity:.8;margin-left:6px">chars/s</span>
   </div>
 </div>

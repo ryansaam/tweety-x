@@ -171,12 +171,69 @@ function wireUI() {
       setStatus(`Queue error: ${e.message}`, "err");
     }
   });
+
+  // Generate reply for the last captured post
+  const genReplyBtn = $("#xbot-gen-reply");
+  genReplyBtn?.addEventListener("click", async () => {
+    try {
+      setStatus("Queue: generate_post_reply", "loading");
+      await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({
+          type: "XBOT_QUEUE_ADD",
+          workType: "generate_post_reply",
+          payload: {},
+        }, (res) => {
+          if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+          resolve(res);
+        });
+      });
+      setStatus("Queued generate_post_reply", "ok");
+    } catch (e) {
+      console.warn("[X-BOT] enqueue generate_post_reply failed:", e);
+      setStatus(`Queue error: ${e.message}`, "err");
+    }
+  });
+
+  // Write (type) the generated reply and post it
+  const writeReplyBtn = $("#xbot-write-reply");
+  const typingCpsInput = $("#xbot-typing-cps");
+  writeReplyBtn?.addEventListener("click", async () => {
+    try {
+      const maxCPS = Math.max(3, Math.min(30, Number(typingCpsInput?.value) || 12));
+      setStatus("Queue: write_post_reply", "loading");
+      await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({
+          type: "XBOT_QUEUE_ADD",
+          workType: "write_post_reply",
+          payload: { maxCPS },
+        }, (res) => {
+          if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+          resolve(res);
+        });
+      });
+      setStatus("Queued write_post_reply", "ok");
+    } catch (e) {
+      console.warn("[X-BOT] enqueue write_post_reply failed:", e);
+      setStatus(`Queue error: ${e.message}`, "err");
+    }
+  });
 }
 
-// ---------- optional debug log bridge (BG -> content) ----------
+// ---------- debug + reply events from BG (BG -> content) ----------
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === "XBOT_DEBUG") {
     try { console.log("[X-BOT][debug]", msg.tag || "", msg.payload || msg); } catch {}
+    try { sendResponse?.({ ok: true }); } catch {}
+    return;
+  }
+  if (msg?.type === "XBOT_REPLY_READY") {
+    try {
+      const p = msg.payload || {};
+      console.log("[X-BOT][reply]", p);
+      setStatus("Reply ready", "ok");
+    } catch (e) {
+      setStatus(`Reply error: ${e?.message || e}`, "err");
+    }
   }
   if (msg?.type === "XBOT_CAPTURED_POST") {
     try { console.log("[X-BOT][captured]", msg.payload); } catch {}

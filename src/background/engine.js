@@ -13,12 +13,38 @@ export const engine = {
 };
 
 const stateByTab = new Map();
-// shape per tab: { running:boolean, attached:boolean, locks:number, engineTicking:boolean }
+// shape per tab:
+// { running:boolean, attached:boolean, locks:number, engineTicking:boolean,
+//   lastCapturedPost:object|null, lastGeneratedReply:object|null,
+//   idleHintMs:number }
 export function getTabState(tabId) {
   if (!stateByTab.has(tabId)) {
-    stateByTab.set(tabId, { running: false, attached: false, locks: 0, engineTicking: false });
+    stateByTab.set(tabId, {
+      running: false,
+      attached: false,
+      locks: 0,
+      engineTicking: false,
+      lastCapturedPost: null,
+      lastGeneratedReply: null,
+      idleHintMs: 0,
+    });
   }
   return stateByTab.get(tabId);
+}
+
+export function setLastCapturedPost(tabId, post) {
+  const st = getTabState(tabId);
+  st.lastCapturedPost = post || null;
+}
+
+export function setLastGeneratedReply(tabId, replyObj) {
+  const st = getTabState(tabId);
+  st.lastGeneratedReply = replyObj || null;
+}
+
+export function setIdleHint(tabId, ms) {
+  const st = getTabState(tabId);
+  st.idleHintMs = Math.max(0, Math.min(250, Number(ms) || 0)); // clamp 0..250ms
 }
 
 export function updateFps(now) {

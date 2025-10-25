@@ -1,5 +1,5 @@
 // index.js — service worker entry point
-import { DEBUG_LOG_STEPS, engine, getTabState, run } from "./engine.js";
+import { DEBUG_LOG_STEPS, engine, getTabState, run, setIdleHint } from "./engine.js";
 import { ensureTimelineAnchor, getTimelineAnchor, invalidate as invalidateLayout } from "./layout.js";
 import { attachIfNeeded, maybeDetach } from "./cdp.js";
 import { enqueueWork, peek as queuePeek, size as queueSize } from "./queue.js";
@@ -30,10 +30,23 @@ async function engineLoop(tabId) {
       try {
         const now = performance.now();
 
+        // If a job asked us to idle (e.g., waiting on network), back off CDP a bit
+        const idleMs = st.idleHintMs || 0;
+        if (!idleMs) {
+          await chrome.debugger.sendCommand({ tabId }, "Page.getLayoutMetrics");
+        }
+
         // one frame worth of simulation + render (run() handles frameCount + FPS)
         await run(tabId, now);
 
-        // 1s heartbeat so you can see progress live in SW console
+        // Gentle idle sleep if requested by active job
+        if (idleMs) {
+          await new Promise(r => setTimeout(r, idleMs));
+          // reset hint so the job can re-hint each render if still waiting
+          setIdleHint(tabId, 0);
+        }
+
+        // 5s heartbeat so you can see progress live in SW console
         if (now - lastFpsLog >= 5000) {
           console.log(`[X-BOT/bg] fps=${engine.fps} frames=${engine.frameCount} queue=${queueSize()} active=${getActiveMeta() ? getActiveMeta().type : "none"}`);
           lastFpsLog = now;
@@ -111,6 +124,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         frames: engine.frameCount,
         queue_len: queueSize() + (getActiveMeta() ? 1 : 0),
         active_job: getActiveMeta(),
+        last_captured_post: st.lastCapturedPost || null,
+        last_generated_reply: st.lastGeneratedReply || null,
       });
       return;
     }
